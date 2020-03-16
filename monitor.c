@@ -726,7 +726,7 @@ m_priv_local_sanitize_path(const char *path, size_t pmax, int flags)
 		strlcat(new_path, enddir, sizeof(new_path));
 	}
 
-	if (realpath("/var/chroot/isakmpd", var_run) == NULL)
+	if (realpath("/var/run", var_run) == NULL)
 		return 1;
 	strlcat(var_run, "/", sizeof(var_run));
 
