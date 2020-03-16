@@ -39,7 +39,9 @@
 
 #include <net/pfkeyv2.h>
 #include <netinet/in.h>
+#ifdef __OpenBSD__
 #include <netinet/ip_ipsp.h>
+#endif
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <poll.h>
@@ -48,6 +50,7 @@
 #include <pwd.h>
 #include <errno.h>
 #include <bitstring.h>
+#include <inttypes.h>
 
 #include "cert.h"
 #include "conf.h"
@@ -589,10 +592,13 @@ pf_key_v2_get_spi(size_t *sz, u_int8_t proto, struct sockaddr *src,
 	/* Setup the SPIRANGE extension.  */
 	spirange.sadb_spirange_exttype = SADB_EXT_SPIRANGE;
 	spirange.sadb_spirange_len = sizeof spirange / PF_KEY_V2_CHUNK;
+#ifdef CPI_RESERVED_MAX
 	if (proto == IPSEC_PROTO_IPCOMP) {
 		spirange.sadb_spirange_min = CPI_RESERVED_MAX + 1;
 		spirange.sadb_spirange_max = CPI_PRIVATE_MIN - 1;
-	} else {
+	} else
+#endif
+	{
 		spirange.sadb_spirange_min = IPSEC_SPI_LOW;
 		spirange.sadb_spirange_max = 0xffffffff;
 	}
@@ -658,7 +664,9 @@ pf_key_v2_get_kernel_sa(u_int8_t *spi, size_t spi_sz, u_int8_t proto,
 	struct pf_key_v2_msg *gettdb = 0, *ret = 0;
 	struct pf_key_v2_node *ext;
 	static struct sa_kinfo ksa;
+#ifdef SADB_X_EXT_UDPENCAP
 	struct sadb_x_udpencap *udpencap;
+#endif
 	int len, err;
 
 	if (spi_sz != sizeof (ssa->sadb_sa_spi))
@@ -775,11 +783,13 @@ pf_key_v2_get_kernel_sa(u_int8_t *spi, size_t spi_sz, u_int8_t proto,
 		ksa.exp_first_use = life->sadb_lifetime_usetime;
 	}
 
+#ifdef SADB_X_EXT_LIFETIME_LASTUSE
 	ext = pf_key_v2_find_ext(ret, SADB_X_EXT_LIFETIME_LASTUSE);
 	if (ext) {
 		life = (struct sadb_lifetime *)ext->seg;
 		ksa.last_used = life->sadb_lifetime_usetime;
 	}
+#endif
 
 	ext = pf_key_v2_find_ext(ret, SADB_EXT_ADDRESS_SRC);
 	if (ext) {
@@ -797,11 +807,13 @@ pf_key_v2_get_kernel_sa(u_int8_t *spi, size_t spi_sz, u_int8_t proto,
 		    sizeof(struct sockaddr_in6));
 	}
 
+#ifdef SADB_X_EXT_UDPENCAP
 	ext = pf_key_v2_find_ext(ret, SADB_X_EXT_UDPENCAP);
 	if (ext) {
 		udpencap = (struct sadb_x_udpencap *)ext->seg;
 		ksa.udpencap_port = udpencap->sadb_x_udpencap_port;
 	}
+#endif
 
 	pf_key_v2_msg_free(ret);
 
@@ -874,7 +886,9 @@ pf_key_v2_set_spi(struct sa *sa, struct proto *proto, int incoming,
 {
 	struct sadb_msg msg;
 	struct sadb_sa  ssa;
+#ifdef SADB_X_EXT_TAG
 	struct sadb_x_tag *stag = NULL;
+#endif
 	struct sadb_lifetime *life = 0;
 	struct sadb_address *addr = 0;
 	struct sadb_key *key = 0;
@@ -887,9 +901,13 @@ pf_key_v2_set_spi(struct sa *sa, struct proto *proto, int incoming,
 	u_int8_t       *pp;
 	int		idtype;
 	struct ipsec_sa *isa = sa->data;
+#ifdef SADB_X_EXT_FLOW_TYPE
 	struct sadb_protocol flowtype, tprotocol;
+#endif
+#ifdef SADB_X_EXT_UDPENCAP
 	struct sadb_x_udpencap udpencap;
-	char           *addr_str, *s;
+#endif
+	char           *addr_str;
 
 	msg.sadb_msg_type = incoming ? SADB_UPDATE : SADB_ADD;
 	switch (proto->proto) {
@@ -919,13 +937,17 @@ pf_key_v2_set_spi(struct sa *sa, struct proto *proto, int incoming,
 			ssa.sadb_sa_encrypt = SADB_X_EALG_AESGMAC;
 			break;
 
+#ifdef SADB_X_EALG_CAST
 		case IPSEC_ESP_CAST:
 			ssa.sadb_sa_encrypt = SADB_X_EALG_CAST;
 			break;
+#endif
 
+#ifdef SADB_X_EALG_BLF
 		case IPSEC_ESP_BLOWFISH:
 			ssa.sadb_sa_encrypt = SADB_X_EALG_BLF;
 			break;
+#endif
 
 		case IPSEC_ESP_NULL:
 			ssa.sadb_sa_encrypt = SADB_EALG_NULL;
@@ -1067,11 +1089,14 @@ pf_key_v2_set_spi(struct sa *sa, struct proto *proto, int incoming,
 	    iproto->replay_window;
 	ssa.sadb_sa_state = SADB_SASTATE_MATURE;
 	ssa.sadb_sa_flags = 0;
+#ifdef SADB_X_SAFLAGS_TUNNEL
 	if (iproto->encap_mode == IPSEC_ENCAP_TUNNEL ||
 	    iproto->encap_mode == IPSEC_ENCAP_UDP_ENCAP_TUNNEL ||
 	    iproto->encap_mode == IPSEC_ENCAP_UDP_ENCAP_TUNNEL_DRAFT)
 		ssa.sadb_sa_flags = SADB_X_SAFLAGS_TUNNEL;
+#endif
 
+#ifdef SADB_X_SAFLAGS_UDPENCAP
 	if (isakmp_sa->flags & SA_FLAG_NAT_T_ENABLE) {
 		bzero(&udpencap, sizeof udpencap);
 		ssa.sadb_sa_flags |= SADB_X_SAFLAGS_UDPENCAP;
@@ -1083,6 +1108,7 @@ pf_key_v2_set_spi(struct sa *sa, struct proto *proto, int incoming,
 		    == -1)
 			goto cleanup;
 	}
+#endif
 
 	if (pf_key_v2_msg_add(update, (struct sadb_ext *)&ssa, 0) == -1)
 		goto cleanup;
@@ -1294,6 +1320,7 @@ nodid:
 	}
 
 	/* Setup the flow type extension.  */
+#ifdef SADB_X_EXT_FLOW_TYPE
 	bzero(&flowtype, sizeof flowtype);
 	flowtype.sadb_protocol_exttype = SADB_X_EXT_FLOW_TYPE;
 	flowtype.sadb_protocol_len = sizeof flowtype / PF_KEY_V2_CHUNK;
@@ -1302,7 +1329,9 @@ nodid:
 
 	if (pf_key_v2_msg_add(update, (struct sadb_ext *)&flowtype, 0) == -1)
 		goto cleanup;
+#endif
 
+#ifdef SADB_X_EXT_PROTOCOL
 	bzero(&tprotocol, sizeof tprotocol);
 	tprotocol.sadb_protocol_exttype = SADB_X_EXT_PROTOCOL;
 	tprotocol.sadb_protocol_len = sizeof tprotocol / PF_KEY_V2_CHUNK;
@@ -1311,8 +1340,10 @@ nodid:
 	if (pf_key_v2_msg_add(update, (struct sadb_ext *)&tprotocol,
 	    0) == -1)
 		goto cleanup;
+#endif
 
 	len = sizeof *addr + PF_KEY_V2_ROUND(SA_LEN(isa->src_net));
+#ifdef SADB_X_EXT_SRC_FLOW
 	addr = calloc(1, len);
 	if (!addr)
 		goto cleanup;
@@ -1325,7 +1356,9 @@ nodid:
 	    PF_KEY_V2_NODE_MALLOCED) == -1)
 		goto cleanup;
 	addr = 0;
+#endif
 
+#ifdef SADB_X_EXT_DST_MASK
 	addr = calloc(1, len);
 	if (!addr)
 		goto cleanup;
@@ -1339,7 +1372,9 @@ nodid:
 	    PF_KEY_V2_NODE_MALLOCED) == -1)
 		goto cleanup;
 	addr = 0;
+#endif
 
+#ifdef SADB_X_EXT_DST_FLOW
 	addr = calloc(1, len);
 	if (!addr)
 		goto cleanup;
@@ -1352,7 +1387,9 @@ nodid:
 	    PF_KEY_V2_NODE_MALLOCED) == -1)
 		goto cleanup;
 	addr = 0;
+#endif
 
+#ifdef SADB_X_EXT_SRC_MASK
 	addr = calloc(1, len);
 	if (!addr)
 		goto cleanup;
@@ -1366,9 +1403,12 @@ nodid:
 	    PF_KEY_V2_NODE_MALLOCED) == -1)
 		goto cleanup;
 	addr = 0;
+#endif
 
 	/* Add a pf tag to matching packets of this SA. */
+#ifdef SADB_X_EXT_TAG
 	if (sa->tag != NULL) {
+		char *s;
 		len = sizeof(*stag) + PF_KEY_V2_ROUND(strlen(sa->tag) + 1);
 		if ((stag = calloc(1, len)) == NULL)
 			goto cleanup;
@@ -1381,6 +1421,7 @@ nodid:
 		    PF_KEY_V2_NODE_MALLOCED) == -1)
 			goto cleanup;
 	}
+#endif
 
 	/* XXX Here can sensitivity extensions be setup.  */
 
@@ -1473,15 +1514,22 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 {
 	char           *laddr_str, *lmask_str, *raddr_str, *rmask_str;
 
+#ifdef SADB_X_DELFLOW
 	struct sadb_msg msg;
+#endif
+#ifdef SADB_X_EXT_FLOW_TYPE
 	struct sadb_protocol flowtype;
+#endif
 	struct sadb_ident *sid = 0;
 	struct sadb_address *addr = 0;
+#ifdef SADB_X_EXT_FLOW_TYPE
 	struct sadb_protocol tprotocol;
+#endif
 	struct pf_key_v2_msg *flow = 0, *ret = 0;
 	size_t		len;
 	int		err;
 
+#ifdef SADB_X_DELFLOW
 	msg.sadb_msg_type = delete ? SADB_X_DELFLOW : SADB_X_ADDFLOW;
 	switch (proto) {
 	case IPSEC_PROTO_IPSEC_ESP:
@@ -1546,7 +1594,9 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 			sid = 0;
 		}
 	}
+#endif
 	/* Setup the flow type extension.  */
+#ifdef SADB_X_EXT_FLOW_TYPE
 	bzero(&flowtype, sizeof flowtype);
 	flowtype.sadb_protocol_exttype = SADB_X_EXT_FLOW_TYPE;
 	flowtype.sadb_protocol_len = sizeof flowtype / PF_KEY_V2_CHUNK;
@@ -1556,6 +1606,7 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 
 	if (pf_key_v2_msg_add(flow, (struct sadb_ext *)&flowtype, 0) == -1)
 		goto cleanup;
+#endif
 
 	/*
 	 * Setup the ADDRESS extensions.
@@ -1576,6 +1627,7 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 		addr = 0;
 	}
 	len = sizeof *addr + PF_KEY_V2_ROUND(SA_LEN(laddr));
+#ifdef SADB_X_EXT_SRC_FLOW
 	addr = calloc(1, len);
 	if (!addr)
 		goto cleanup;
@@ -1587,11 +1639,13 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 	    PF_KEY_V2_NODE_MALLOCED) == -1)
 		goto cleanup;
 	addr = 0;
+#endif
 
+#ifdef SADB_X_EXT_DST_MASK
 	addr = calloc(1, len);
 	if (!addr)
 		goto cleanup;
-	addr->sadb_address_exttype = SADB_X_EXT_SRC_MASK;
+	addr->sadb_address_exttype = SADB_X_EXT_DST_MASK;
 	addr->sadb_address_len = len / PF_KEY_V2_CHUNK;
 	addr->sadb_address_reserved = 0;
 	pf_key_v2_setup_sockaddr(addr + 1, lmask, 0, sport ? 0xffff : 0, 0);
@@ -1599,7 +1653,9 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 	    PF_KEY_V2_NODE_MALLOCED) == -1)
 		goto cleanup;
 	addr = 0;
+#endif
 
+#ifdef SADB_X_EXT_DST_FLOW
 	addr = calloc(1, len);
 	if (!addr)
 		goto cleanup;
@@ -1611,7 +1667,9 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 	    PF_KEY_V2_NODE_MALLOCED) == -1)
 		goto cleanup;
 	addr = 0;
+#endif
 
+#ifdef SADB_X_EXT_DST_MASK
 	addr = calloc(1, len);
 	if (!addr)
 		goto cleanup;
@@ -1623,7 +1681,9 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 	    PF_KEY_V2_NODE_MALLOCED) == -1)
 		goto cleanup;
 	addr = 0;
+#endif
 
+#ifdef SADB_X_EXT_PROTOCOL
 	/* Setup the protocol extension.  */
 	bzero(&tprotocol, sizeof tprotocol);
 	tprotocol.sadb_protocol_exttype = SADB_X_EXT_PROTOCOL;
@@ -1632,6 +1692,7 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 
 	if (pf_key_v2_msg_add(flow, (struct sadb_ext *)&tprotocol, 0) == -1)
 		goto cleanup;
+#endif
 
 	if (sockaddr2text(laddr, &laddr_str, 0))
 		laddr_str = 0;
@@ -2254,6 +2315,7 @@ pf_key_v2_expire(struct pf_key_v2_msg *pmsg)
 	}
 }
 
+#ifdef SADB_X_EXT_SRC_FLOW
 static int
 mask4len(const struct sockaddr_in *mask)
 {
@@ -2286,6 +2348,7 @@ mask6len(const struct sockaddr_in6 *mask)
 		len = -1;
 	return len;
 }
+#endif
 
 static int
 phase2id(char *str, size_t size, const char *side, const char *sflow,
@@ -2309,25 +2372,33 @@ phase2id(char *str, size_t size, const char *side, const char *sflow,
 static void
 pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 {
+	struct sadb_msg *msg;
+#ifdef SADB_X_ASKPOLICY
 	struct sadb_msg *msg, askpolicy_msg;
-	struct pf_key_v2_msg *askpolicy = 0, *ret = 0;
 	struct sadb_x_policy policy;
+#endif
+	struct pf_key_v2_msg *askpolicy = 0, *ret = 0;
 	struct sadb_address *dst = 0, *src = 0;
 	struct sockaddr *dstaddr, *srcaddr = 0;
-	struct sadb_comb *scmb = 0;
+#ifdef notyet
 	struct sadb_prop *sprp = 0;
+#endif
 	struct sadb_ident *srcident = 0, *dstident = 0;
 	char		dstbuf[ADDRESS_MAX], srcbuf[ADDRESS_MAX], *peer = 0;
 	char		confname[120], *conn = 0;
 	char           *srcid = 0, *dstid = 0, *prefstring = 0;
 	int		slen, af, afamily, masklen;
+#ifdef SADB_X_EXT_SRC_MASK
 	struct sockaddr *smask, *sflow, *dmask, *dflow;
+#endif
+#ifdef SADB_X_EXT_FLOW_TYPE
 	struct sadb_protocol *sproto;
+#endif
 	char		ssflow[ADDRESS_MAX], sdflow[ADDRESS_MAX];
 	char		sdmask[ADDRESS_MAX], ssmask[ADDRESS_MAX];
 	int		dmasklen, smasklen;
 	char           *sidtype = 0, *didtype = 0;
-	char		lname[100], dname[100], configname[200];
+	char		lname[100], dname[100], configname[1024];
 	int		shostflag = 0, dhostflag = 0;
 	struct pf_key_v2_node *ext;
 	struct passwd  *pwd = 0;
@@ -2358,11 +2429,12 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 	if (ext)
 		src = ext->seg;
 
+#ifdef notyet
 	ext = pf_key_v2_find_ext(pmsg, SADB_EXT_PROPOSAL);
 	if (ext) {
 		sprp = ext->seg;
-		scmb = (struct sadb_comb *) (sprp + 1);
 	}
+#endif
 	ext = pf_key_v2_find_ext(pmsg, SADB_EXT_IDENTITY_SRC);
 	if (ext)
 		srcident = ext->seg;
@@ -2371,6 +2443,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 	if (ext)
 		dstident = ext->seg;
 
+#ifdef SADB_X_ASKPOLICY
 	/* Ask the kernel for the matching policy. */
 	bzero(&askpolicy_msg, sizeof askpolicy_msg);
 	askpolicy_msg.sadb_msg_type = SADB_X_ASKPOLICY;
@@ -2387,16 +2460,19 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 	ret = pf_key_v2_call(askpolicy);
 	if (!ret)
 		goto fail;
+#endif
 
 	/* Now we have all the information needed. */
 
+#ifdef SADB_X_EXT_SRC_FLOW
 	ext = pf_key_v2_find_ext(ret, SADB_X_EXT_SRC_FLOW);
 	if (!ext) {
 		log_print("pf_key_v2_acquire: no source flow extension found");
 		goto fail;
 	}
 	sflow = (struct sockaddr *) (((struct sadb_address *) ext->seg) + 1);
-
+#endif
+#ifdef SADB_X_EXT_DST_FLOW
 	ext = pf_key_v2_find_ext(ret, SADB_X_EXT_DST_FLOW);
 	if (!ext) {
 		log_print("pf_key_v2_acquire: "
@@ -2404,13 +2480,16 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 		goto fail;
 	}
 	dflow = (struct sockaddr *) (((struct sadb_address *) ext->seg) + 1);
+#endif
+#ifdef SADB_X_EXT_SRC_MASK
 	ext = pf_key_v2_find_ext(ret, SADB_X_EXT_SRC_MASK);
 	if (!ext) {
 		log_print("pf_key_v2_acquire: no source mask extension found");
 		goto fail;
 	}
 	smask = (struct sockaddr *) (((struct sadb_address *) ext->seg) + 1);
-
+#endif
+#ifdef SADB_X_EXT_DST_MASK
 	ext = pf_key_v2_find_ext(ret, SADB_X_EXT_DST_MASK);
 	if (!ext) {
 		log_print("pf_key_v2_acquire: "
@@ -2418,7 +2497,8 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 		goto fail;
 	}
 	dmask = (struct sockaddr *) (((struct sadb_address *) ext->seg) + 1);
-
+#endif
+#ifdef SADB_X_EXT_FLOW_TYPE
 	ext = pf_key_v2_find_ext(ret, SADB_X_EXT_FLOW_TYPE);
 	if (!ext) {
 		log_print("pf_key_v2_acquire: no flow type extension found");
@@ -2426,6 +2506,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 	}
 	sproto = ext->seg;
 	tproto = sproto->sadb_protocol_proto;
+#endif
 
 	bzero(ssflow, sizeof ssflow);
 	bzero(sdflow, sizeof sdflow);
@@ -2435,6 +2516,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 
 	sidtype = didtype = "IPV4_ADDR_SUBNET";	/* default */
 
+#ifdef SADB_X_EXT_SRC_FLOW
 	switch (sflow->sa_family) {
 	case AF_INET:
 		if (inet_ntop(AF_INET,
@@ -2517,11 +2599,13 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 		}
 		break;
 	}
+#endif
 
 	dstaddr = (struct sockaddr *)(dst + 1);
 	bzero(dstbuf, sizeof dstbuf);
 	bzero(srcbuf, sizeof srcbuf);
 
+#ifdef SADB_X_EXT_SRC_FLOW
 	if (dstaddr->sa_family == 0) {
 		/*
 		 * Destination was not specified in the flow -- can we derive
@@ -2534,6 +2618,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 		}
 		dstaddr = dflow;
 	}
+#endif
 	switch (dstaddr->sa_family) {
 	case AF_INET:
 		if (inet_ntop(AF_INET,
@@ -2686,7 +2771,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 						log_error("pf_key_v2_acquire: "
 						    "could not acquire "
 						    "username from provided "
-						    "ID %llu",
+						    "ID %" PRIu64,
 						    srcident->sadb_ident_id);
 						goto fail;
 					}
@@ -2829,7 +2914,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 						log_error("pf_key_v2_acquire: "
 						    "could not acquire "
 						    "username from provided "
-						    "ID %llu",
+						    "ID %" PRIu64,
 						    dstident->sadb_ident_id);
 						goto fail;
 					}
@@ -3215,15 +3300,20 @@ int
 pf_key_v2_group_spis(struct sa *sa, struct proto *proto1,
     struct proto *proto2, int incoming)
 {
+#ifdef SADB_X_GRPSPIS
 	struct sadb_msg msg;
+	int		err;
+#endif
 	struct sadb_sa  sa1, sa2;
 	struct sadb_address *addr = 0;
+#ifdef SADB_X_EXT_PROTOCOL
 	struct sadb_protocol protocol;
+#endif
 	struct pf_key_v2_msg *grpspis = 0, *ret = 0;
 	struct sockaddr *saddr;
-	int		err;
 	size_t		len;
 
+#ifdef SADB_X_GRPSPIS
 	msg.sadb_msg_type = SADB_X_GRPSPIS;
 	switch (proto1->proto) {
 	case IPSEC_PROTO_IPSEC_ESP:
@@ -3244,6 +3334,7 @@ pf_key_v2_group_spis(struct sa *sa, struct proto *proto1,
 	grpspis = pf_key_v2_msg_new(&msg, 0);
 	if (!grpspis)
 		goto cleanup;
+#endif
 
 	/* Setup the SA extensions.  */
 	sa1.sadb_sa_exttype = SADB_EXT_SA;
@@ -3291,6 +3382,7 @@ pf_key_v2_group_spis(struct sa *sa, struct proto *proto1,
 		goto cleanup;
 	addr = 0;
 
+#ifdef SADB_X_EXT_DST2
 	addr = calloc(1, len);
 	if (!addr)
 		goto cleanup;
@@ -3303,7 +3395,9 @@ pf_key_v2_group_spis(struct sa *sa, struct proto *proto1,
 	    PF_KEY_V2_NODE_MALLOCED) == -1)
 		goto cleanup;
 	addr = 0;
+#endif
 
+#ifdef SADB_X_EXT_SATYPE2
 	/* Setup the sa type extension.  */
 	protocol.sadb_protocol_exttype = SADB_X_EXT_SATYPE2;
 	protocol.sadb_protocol_len = sizeof protocol / PF_KEY_V2_CHUNK;
@@ -3338,6 +3432,7 @@ pf_key_v2_group_spis(struct sa *sa, struct proto *proto1,
 		goto cleanup;
 	}
 	pf_key_v2_msg_free(ret);
+#endif
 
 	LOG_DBG((LOG_SYSDEP, 50, "pf_key_v2_group_spis: done"));
 

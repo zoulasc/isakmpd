@@ -185,12 +185,14 @@ _log_print(int error, int syslog_level, const char *fmt, va_list ap,
 		tm = localtime(&t);
 		if (class >= 0)
 			snprintf(nbuf, sizeof nbuf,
-			    "%02d%02d%02d.%06ld %s %02d ",
-			    tm->tm_hour, tm->tm_min, tm->tm_sec, now.tv_usec,
+			    "%02d%02d%02d.%06jd %s %02d ",
+			    tm->tm_hour, tm->tm_min, tm->tm_sec,
+			    (intmax_t)now.tv_usec,
 			    _log_get_class(class), level);
 		else /* LOG_PRINT (-1) or LOG_REPORT (-2) */
-			snprintf(nbuf, sizeof nbuf, "%02d%02d%02d.%06ld %s ",
-			    tm->tm_hour, tm->tm_min, tm->tm_sec, now.tv_usec,
+			snprintf(nbuf, sizeof nbuf, "%02d%02d%02d.%06jd %s ",
+			    tm->tm_hour, tm->tm_min, tm->tm_sec,
+			    (intmax_t)now.tv_usec,
 			    class == LOG_PRINT ? "Default" : "Report>");
 		strlcat(nbuf, buffer, sizeof nbuf);
 		strlcat(nbuf, getuid() ? "" : " [priv]", LOG_SIZE + 32);

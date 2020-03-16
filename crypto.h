@@ -33,7 +33,9 @@
 #define _CRYPTO_H_
 
 #include <openssl/des.h>
+#ifdef HAVE_BLOWISH
 #include <blf.h>
+#endif
 #include <openssl/cast.h>
 
 #include <openssl/aes.h>
@@ -81,7 +83,9 @@ struct keystate {
 	u_int8_t       *riv, *liv;
 	union {
 		DES_key_schedule desks[3];
+#ifdef HAVE_BLOWFISH
 		blf_ctx         blfks;
+#endif
 		CAST_KEY        castks;
 		AES_KEY         aesks[2];
 	}               keydata;

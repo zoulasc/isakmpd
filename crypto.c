@@ -38,13 +38,17 @@
 #include "log.h"
 
 enum cryptoerr  des3_init(struct keystate *, u_int8_t *, u_int16_t);
+#ifdef HAVE_BLOWFISH
 enum cryptoerr  blf_init(struct keystate *, u_int8_t *, u_int16_t);
+#endif
 enum cryptoerr  cast_init(struct keystate *, u_int8_t *, u_int16_t);
 enum cryptoerr  aes_init(struct keystate *, u_int8_t *, u_int16_t);
 void            des3_encrypt(struct keystate *, u_int8_t *, u_int16_t);
 void            des3_decrypt(struct keystate *, u_int8_t *, u_int16_t);
+#ifdef HAVE_BLOWFISH
 void            blf_encrypt(struct keystate *, u_int8_t *, u_int16_t);
 void            blf_decrypt(struct keystate *, u_int8_t *, u_int16_t);
+#endif
 void            cast1_encrypt(struct keystate *, u_int8_t *, u_int16_t);
 void            cast1_decrypt(struct keystate *, u_int8_t *, u_int16_t);
 void            aes_encrypt(struct keystate *, u_int8_t *, u_int16_t);
@@ -57,12 +61,14 @@ struct crypto_xf transforms[] = {
 		des3_init,
 		des3_encrypt, des3_decrypt
 	},
+#ifdef HAVE_BLOWFISH
 	{
 		BLOWFISH_CBC, "Blowfish (CBC-Mode)", 12, 56,
 		BLOCKSIZE, 0,
 		blf_init,
 		blf_encrypt, blf_decrypt
 	},
+#endif
 	{
 		CAST_CBC, "CAST (CBC-Mode)", 12, 16,
 		BLOCKSIZE, 0,
@@ -112,6 +118,7 @@ des3_decrypt(struct keystate *ks, u_int8_t *data, u_int16_t len)
 	    &ks->ks_des[1], &ks->ks_des[2], (void *)iv, DES_DECRYPT);
 }
 
+#ifdef HAVE_BLOWFISH
 enum cryptoerr
 blf_init(struct keystate *ks, u_int8_t *key, u_int16_t len)
 {
@@ -164,6 +171,7 @@ blf_decrypt(struct keystate *ks, u_int8_t *data, u_int16_t len)
 	SET_32BIT_BIG(data + 4, xr);
 	XOR64(data, ks->riv);
 }
+#endif
 
 enum cryptoerr
 cast_init(struct keystate *ks, u_int8_t *key, u_int16_t len)

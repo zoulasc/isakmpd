@@ -46,7 +46,8 @@ void	hmac_final(unsigned char *, struct hash *);
 static union {
 	MD5_CTX		md5ctx;
 	SHA1_CTX        sha1ctx;
-	SHA2_CTX	sha2ctx;
+	SHA256_CTX	sha256ctx;
+	SHA512_CTX	sha512ctx;
 } Ctx, Ctx2;
 
 /* Temporary hash digest.  */
@@ -72,27 +73,27 @@ static struct hash hashes[] = {
 	hmac_init,
 	hmac_final
     }, {
-	HASH_SHA2_256, 7, SHA2_256_SIZE, (void *)&Ctx.sha2ctx, digest,
-	sizeof(SHA2_CTX), (void *)&Ctx2.sha2ctx,
-	(void (*)(void *))SHA256Init,
-	(void (*)(void *, unsigned char *, unsigned int))SHA256Update,
-	(void (*)(u_int8_t *, void *))SHA256Final,
+	HASH_SHA2_256, 7, SHA2_256_SIZE, (void *)&Ctx.sha256ctx, digest,
+	sizeof(Ctx2.sha256ctx), (void *)&Ctx2.sha256ctx,
+	(void (*)(void *))SHA256_Init,
+	(void (*)(void *, unsigned char *, unsigned int))SHA256_Update,
+	(void (*)(u_int8_t *, void *))SHA256_Final,
 	hmac_init,
 	hmac_final
     }, {
-	HASH_SHA2_384, 8, SHA2_384_SIZE, (void *)&Ctx.sha2ctx, digest,
-	sizeof(SHA2_CTX), (void *)&Ctx2.sha2ctx,
-	(void (*)(void *))SHA384Init,
-	(void (*)(void *, unsigned char *, unsigned int))SHA384Update,
-	(void (*)(u_int8_t *, void *))SHA384Final,
+	HASH_SHA2_384, 8, SHA2_384_SIZE, (void *)&Ctx.sha512ctx, digest,
+	sizeof(Ctx2.sha512ctx), (void *)&Ctx2.sha512ctx,
+	(void (*)(void *))SHA384_Init,
+	(void (*)(void *, unsigned char *, unsigned int))SHA384_Update,
+	(void (*)(u_int8_t *, void *))SHA384_Final,
 	hmac_init,
 	hmac_final
     }, {
-	HASH_SHA2_512, 9, SHA2_512_SIZE, (void *)&Ctx.sha2ctx, digest,
-	sizeof(SHA2_CTX), (void *)&Ctx2.sha2ctx,
-	(void (*)(void *))SHA512Init,
-	(void (*)(void *, unsigned char *, unsigned int))SHA512Update,
-	(void (*)(u_int8_t *, void *))SHA512Final,
+	HASH_SHA2_512, 9, SHA2_512_SIZE, (void *)&Ctx.sha512ctx, digest,
+	sizeof(Ctx2.sha512ctx), (void *)&Ctx2.sha512ctx,
+	(void (*)(void *))SHA512_Init,
+	(void (*)(void *, unsigned char *, unsigned int))SHA512_Update,
+	(void (*)(u_int8_t *, void *))SHA512_Final,
 	hmac_init,
 	hmac_final
     }
@@ -148,7 +149,7 @@ hmac_init(struct hash *hash, unsigned char *okey, unsigned int len)
 	hash->Init(hash->ctx2);
 	hash->Update(hash->ctx2, key, blocklen);
 
-	explicit_bzero(key, blocklen);
+	explicit_memset(key, 0, blocklen);
 }
 
 /*

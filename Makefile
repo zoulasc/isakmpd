@@ -63,6 +63,8 @@ CFLAGS+=	-Wall -Wstrict-prototypes -Wmissing-prototypes \
 #LWRESLIB=      /usr/local/lib/liblwres.a
 #DNSSEC_CFLAGS= -I/usr/local/include -DLWRES
 
+CPPFLAGS+='-DSA_LEN(sa)=(sa)->sa_len' -D_OPENBSD_SOURCE
+
 LDADD+=		${LWRESLIB} -lkeynote -lcrypto -lm
 DPADD+=		${LWRESLIB} ${LIBKEYNOTE} ${LIBCRYPTO} ${LIBM}
 
@@ -84,7 +86,8 @@ isakmp_num.c isakmp_num.h: genconstants.sh isakmp_num.cst
 .PHONY: generated
 generated: ${GENERATED}
 
-BUILDFIRST = ${GENERATED}
 
 .include <bsd.prog.mk>
 .include <bsd.subdir.mk>
+
+${OBJS}: ${GENERATED}

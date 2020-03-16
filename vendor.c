@@ -56,13 +56,13 @@ setup_vendor_hashes(void)
 		hash->Update(hash->ctx,
 		    (unsigned char *)openbsd_vendor_cap[i].text,
 		    strlen(openbsd_vendor_cap[i].text));
-		hash->Final(openbsd_vendor_cap[i].hash, hash->ctx);
+		hash->Final((unsigned char *)openbsd_vendor_cap[i].hash, hash->ctx);
 
 		LOG_DBG((LOG_EXCHANGE, 50, "setup_vendor_hashes: "
 		    "MD5(\"%s\") (%lu bytes)", openbsd_vendor_cap[i].text,
 		    (unsigned long)hash->hashsize));
 		LOG_DBG_BUF((LOG_EXCHANGE, 50, "setup_vendor_hashes",
-		    openbsd_vendor_cap[i].hash, hash->hashsize));
+		    (unsigned char *)openbsd_vendor_cap[i].hash, hash->hashsize));
 	}
 	return 0;
 

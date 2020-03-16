@@ -440,6 +440,7 @@ virtual_bind_if(char *ifname, struct sockaddr *if_addr, void *arg)
 		}
 	}
 
+#ifdef SIOCGIFRDOMAIN
 	if (ioctl(s, SIOCGIFRDOMAIN, (caddr_t)&flags_ifr) == -1) {
 		log_error("virtual_bind_if: "
 		    "ioctl (%d, SIOCGIFRDOMAIN, ...) failed", s);
@@ -454,7 +455,7 @@ virtual_bind_if(char *ifname, struct sockaddr *if_addr, void *arg)
 		close(s);
 		return 0;
 	}
-
+#endif
 	close(s);
 
 	/* Set the port number to zero.  */

@@ -42,7 +42,7 @@ int	ec_create_shared(struct group *, u_int8_t *, u_int8_t *);
 
 #define EC_POINT2RAW_FULL	0
 #define EC_POINT2RAW_XONLY	1
-int	ec_point2raw(struct group *, const EC_POINT *, uint8_t *, size_t, int);
+int	ec_point2raw(struct group *, const EC_POINT *, u_int8_t *, size_t, int);
 EC_POINT *
 	ec_raw2point(struct group *, u_int8_t *, size_t);
 
@@ -334,14 +334,20 @@ int
 modp_init(struct group *group)
 {
 	DH	*dh;
+	BIGNUM	*p = NULL, *g = NULL;
 
 	if ((dh = DH_new()) == NULL)
 		return (-1);
-	group->dh = dh;
 
-	if (!BN_hex2bn(&dh->p, group->spec->prime) ||
-	    !BN_hex2bn(&dh->g, group->spec->generator))
+	if (!BN_hex2bn(&p, group->spec->prime) ||
+	    !BN_hex2bn(&g, group->spec->generator) ||
+	    !DH_set0_pqg(dh, p, NULL, g)) {
+		BN_free(p);
+		BN_free(g);
 		return (-1);
+	}
+
+	group->dh = dh;
 
 	return (0);
 }
@@ -358,11 +364,13 @@ int
 modp_create_exchange(struct group *group, u_int8_t *buf)
 {
 	DH	*dh = group->dh;
+	const BIGNUM *pub_key;
 	int	 len, ret;
 
 	if (!DH_generate_key(dh))
 		return (-1);
-	ret = BN_bn2bin(dh->pub_key, buf);
+	DH_get0_key(dh, &pub_key, NULL);
+	ret = BN_bn2bin(pub_key, buf);
 	if (!ret)
 		return (-1);
 

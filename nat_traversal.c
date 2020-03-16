@@ -117,13 +117,14 @@ nat_t_setup_hashes(void)
 		hash->Update(hash->ctx,
 		    (unsigned char *)isakmp_nat_t_cap[i].text,
 		    strlen(isakmp_nat_t_cap[i].text));
-		hash->Final(isakmp_nat_t_cap[i].hash, hash->ctx);
+		hash->Final((unsigned char *)isakmp_nat_t_cap[i].hash,
+			    hash->ctx);
 
 		LOG_DBG((LOG_EXCHANGE, 50, "nat_t_setup_hashes: "
 		    "MD5(\"%s\") (%lu bytes)", isakmp_nat_t_cap[i].text,
 		    (unsigned long)hash->hashsize));
 		LOG_DBG_BUF((LOG_EXCHANGE, 50, "nat_t_setup_hashes",
-		    isakmp_nat_t_cap[i].hash, hash->hashsize));
+		    (const u_int8_t *)isakmp_nat_t_cap[i].hash, hash->hashsize));
 	}
 
 	return 0;

@@ -57,9 +57,15 @@ sysdep_cleartext(int fd, int af)
 	} optsw[] = {
 	    {
 		IPPROTO_IP,
+#ifdef IP_AUTH_LEVEL
 		IP_AUTH_LEVEL,
+#endif
+#ifdef IP_ESP_TRANS_LEVEL
 		IP_ESP_TRANS_LEVEL,
+#endif
+#ifdef IP_ESP_NETWORK_LEVEL
 		IP_ESP_NETWORK_LEVEL,
+#endif
 #ifdef IP_IPCOMP_LEVEL
 		IP_IPCOMP_LEVEL
 #else
@@ -67,9 +73,15 @@ sysdep_cleartext(int fd, int af)
 #endif
 	    }, {
 		IPPROTO_IPV6,
+#ifdef IPV6_AUTH_LEVEL
 		IPV6_AUTH_LEVEL,
+#endif
+#ifdef IPV6_ESP_TRANS_LEVEL
 		IPV6_ESP_TRANS_LEVEL,
+#endif
+#ifdef IPV6_ESP_NETWORK_LEVEL
 		IPV6_ESP_NETWORK_LEVEL,
+#endif
 #ifdef IPV6_IPCOMP_LEVEL
 		IPV6_IPCOMP_LEVEL
 #else
@@ -97,6 +109,7 @@ sysdep_cleartext(int fd, int af)
 	 * Need to bypass system security policy, so I can send and
 	 * receive key management datagrams in the clear.
 	 */
+#ifdef IPSEC_LEVEL_BYPASS
 	level = IPSEC_LEVEL_BYPASS;
 	if (monitor_setsockopt(fd, optsw[sw].ip_proto, optsw[sw].auth_level,
 	    (char *) &level, sizeof level) == -1) {
@@ -105,6 +118,8 @@ sysdep_cleartext(int fd, int af)
 		    optsw[sw].ip_proto);
 		return -1;
 	}
+#endif
+#ifdef IP_ESP_TRANS_LEVEL
 	if (monitor_setsockopt(fd, optsw[sw].ip_proto, optsw[sw].esp_trans_level,
 	    (char *) &level, sizeof level) == -1) {
 		log_error("sysdep_cleartext: "
@@ -112,6 +127,8 @@ sysdep_cleartext(int fd, int af)
 		    optsw[sw].ip_proto);
 		return -1;
 	}
+#endif
+#ifdef IP_ESP_NETWORK_LEVEL
 	if (monitor_setsockopt(fd, optsw[sw].ip_proto, optsw[sw].esp_network_level,
 	    (char *) &level, sizeof level) == -1) {
 		log_error("sysdep_cleartext: "
@@ -119,6 +136,7 @@ sysdep_cleartext(int fd, int af)
 		    optsw[sw].ip_proto);
 		return -1;
 	}
+#endif
 	if (optsw[sw].ipcomp_level &&
 	    monitor_setsockopt(fd, optsw[sw].ip_proto, optsw[sw].ipcomp_level,
 	    (char *) &level, sizeof level) == -1 &&

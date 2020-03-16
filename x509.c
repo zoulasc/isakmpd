@@ -109,8 +109,8 @@ x509_generate_kn(int id, X509 *cert)
 		    "Conditions: %s >= \"%s\" && %s <= \"%s\";\n";
 	X509_NAME *issuer, *subject;
 	struct keynote_deckey dc;
-	X509_STORE_CTX csc;
-	X509_OBJECT obj;
+	X509_STORE_CTX *csc = NULL;
+	X509_OBJECT *obj = NULL;
 	X509	*icert;
 	RSA	*key = NULL;
 	time_t	tt;
@@ -121,6 +121,15 @@ x509_generate_kn(int id, X509 *cert)
 	LOG_DBG((LOG_POLICY, 90,
 	    "x509_generate_kn: generating KeyNote policy for certificate %p",
 	    cert));
+
+	if ((csc = X509_STORE_CTX_new()) == NULL) {
+		log_print("x509_generate_kn: failed to get memory for context");
+		goto fail;
+	}
+	if ((obj = X509_OBJECT_new()) == NULL) {
+		log_print("x509_generate_kn: failed to get memory for object");
+		goto fail;
+	}
 
 	issuer = X509_get_issuer_name(cert);
 	subject = X509_get_subject_name(cert);
@@ -155,22 +164,22 @@ x509_generate_kn(int id, X509 *cert)
 	key = NULL;
 
 	/* Now find issuer's certificate so we can get the public key.  */
-	X509_STORE_CTX_init(&csc, x509_cas, cert, NULL);
-	if (X509_STORE_get_by_subject(&csc, X509_LU_X509, issuer, &obj) !=
+	X509_STORE_CTX_init(csc, x509_cas, cert, NULL);
+	if (X509_STORE_get_by_subject(csc, X509_LU_X509, issuer, obj) !=
 	    X509_LU_X509) {
-		X509_STORE_CTX_cleanup(&csc);
-		X509_STORE_CTX_init(&csc, x509_certs, cert, NULL);
-		if (X509_STORE_get_by_subject(&csc, X509_LU_X509, issuer, &obj)
+		X509_STORE_CTX_cleanup(csc);
+		X509_STORE_CTX_init(csc, x509_certs, cert, NULL);
+		if (X509_STORE_get_by_subject(csc, X509_LU_X509, issuer, obj)
 		    != X509_LU_X509) {
-			X509_STORE_CTX_cleanup(&csc);
+			X509_STORE_CTX_cleanup(csc);
 			LOG_DBG((LOG_POLICY, 30,
 			    "x509_generate_kn: no certificate found for "
 			    "issuer"));
 			goto fail;
 		}
 	}
-	X509_STORE_CTX_cleanup(&csc);
-	icert = obj.data.x509;
+	X509_STORE_CTX_cleanup(csc);
+	icert = X509_OBJECT_get0_X509(obj);
 
 	if (icert == NULL) {
 		LOG_DBG((LOG_POLICY, 30, "x509_generate_kn: "
@@ -182,7 +191,6 @@ x509_generate_kn(int id, X509 *cert)
 		    "x509_generate_kn: failed to get public key from cert"));
 		goto fail;
 	}
-	X509_OBJECT_free_contents(&obj);
 
 	dc.dec_algorithm = KEYNOTE_ALGORITHM_RSA;
 	dc.dec_key = key;
@@ -435,6 +443,8 @@ x509_generate_kn(int id, X509 *cert)
 	return 1;
 
 fail:
+	X509_STORE_CTX_free(csc);
+	X509_OBJECT_free(obj);
 	free(buf);
 	free(skey);
 	free(ikey);
@@ -664,7 +674,7 @@ x509_read_crls_from_dir(X509_STORE *ctx, char *name)
 	struct stat	sb;
 	char		fullname[PATH_MAX];
 	char		file[PATH_MAX];
-	int		fd, off, size;
+	int		fd;
 
 	if (strlen(name) >= sizeof fullname - 1) {
 		log_print("x509_read_crls_from_dir: directory name too long");
@@ -679,8 +689,6 @@ x509_read_crls_from_dir(X509_STORE *ctx, char *name)
 		return 0;
 	}
 	strlcpy(fullname, name, sizeof fullname);
-	off = strlen(fullname);
-	size = sizeof fullname - off;
 
 	while ((fd = monitor_readdir(file, sizeof file)) != -1) {
 		LOG_DBG((LOG_CRYPTO, 60, "x509_read_crls_from_dir: reading "
@@ -820,33 +828,42 @@ x509_cert_get(u_int8_t *asn, u_int32_t len)
 int
 x509_cert_validate(void *scert)
 {
-	X509_STORE_CTX	csc;
+	X509_STORE_CTX	*csc;
 	X509_NAME	*issuer, *subject;
 	X509		*cert = (X509 *) scert;
 	EVP_PKEY	*key;
 	int		res, err;
+	int		rv = 0, flags;
 
+	if ((csc = X509_STORE_CTX_new()) == NULL) {
+		log_print("x509_cert_validate: failed to get memory for "
+		    "context");
+		return 0;
+	}
 	/*
 	 * Validate the peer certificate by checking with the CA certificates
 	 * we trust.
 	 */
-	X509_STORE_CTX_init(&csc, x509_cas, cert, NULL);
-#if OPENSSL_VERSION_NUMBER >= 0x00908000L
+	X509_STORE_CTX_init(csc, x509_cas, cert, NULL);
+
 	/* XXX See comment in x509_read_crls_from_dir.  */
-	if (x509_cas->param->flags & X509_V_FLAG_CRL_CHECK) {
-		X509_STORE_CTX_set_flags(&csc, X509_V_FLAG_CRL_CHECK);
-		X509_STORE_CTX_set_flags(&csc, X509_V_FLAG_CRL_CHECK_ALL);
-	}
+#if OPENSSL_VERSION_NUMBER >= 0x00101000L
+	flags = X509_VERIFY_PARAM_get_flags(X509_STORE_get0_param(x509_cas));
+#elif OPENSSL_VERSION_NUMBER >= 0x00908000L
+	/* XXX See comment in x509_read_crls_from_dir.  */
+	flags = x509_cas->param->flags;
 #elif OPENSSL_VERSION_NUMBER >= 0x00907000L
-	/* XXX See comment in x509_read_crls_from_dir.  */
-	if (x509_cas->flags & X509_V_FLAG_CRL_CHECK) {
-		X509_STORE_CTX_set_flags(&csc, X509_V_FLAG_CRL_CHECK);
-		X509_STORE_CTX_set_flags(&csc, X509_V_FLAG_CRL_CHECK_ALL);
-	}
+	flags = x509_cas->flags;
+#else
+	flags = 0;
 #endif
-	res = X509_verify_cert(&csc);
-	err = csc.error;
-	X509_STORE_CTX_cleanup(&csc);
+	if (flags & X509_V_FLAG_CRL_CHECK) {
+		X509_STORE_CTX_set_flags(csc, X509_V_FLAG_CRL_CHECK);
+		X509_STORE_CTX_set_flags(csc, X509_V_FLAG_CRL_CHECK_ALL);
+	}
+	res = X509_verify_cert(csc);
+	err = X509_STORE_CTX_get_error(csc);
+	X509_STORE_CTX_cleanup(csc);
 
 	/*
 	 * Return if validation succeeded or self-signed certs are not
@@ -856,36 +873,40 @@ x509_cert_validate(void *scert)
 	 * retried somehow.  We take this as an error and give up.
 	 */
 	if (res > 0)
-		return 1;
+		goto success;
 	else if (res < 0 ||
 	    (res == 0 && err != X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT)) {
 		if (err)
 			log_print("x509_cert_validate: %.100s",
 			    X509_verify_cert_error_string(err));
-		return 0;
+		goto fail;
 	} else if (!conf_get_str("X509-certificates", "Accept-self-signed")) {
 		if (err)
 			log_print("x509_cert_validate: %.100s",
 			    X509_verify_cert_error_string(err));
-		return 0;
+		goto fail;
 	}
 	issuer = X509_get_issuer_name(cert);
 	subject = X509_get_subject_name(cert);
 
 	if (!issuer || !subject || X509_name_cmp(issuer, subject))
-		return 0;
+		goto fail;
 
 	key = X509_get_pubkey(cert);
 	if (!key) {
 		log_print("x509_cert_validate: could not get public key from "
 		    "self-signed cert");
-		return 0;
+		goto fail;
 	}
 	if (X509_verify(cert, key) == -1) {
 		log_print("x509_cert_validate: self-signed cert is bad");
-		return 0;
+		goto fail;
 	}
-	return 1;
+success:
+	rv = 1;
+fail:
+	X509_STORE_CTX_free(csc);
+	return rv;
 }
 
 int
@@ -1078,10 +1099,11 @@ x509_cert_obtain(u_int8_t *id, size_t id_len, void *data, u_int8_t **cert,
 
 /* Returns a pointer to the subjectAltName information of X509 certificate.  */
 int
-x509_cert_subjectaltname(X509 *scert, u_int8_t **altname, u_int32_t *len)
+x509_cert_subjectaltname(X509 *scert, const u_int8_t **altname, u_int32_t *len)
 {
 	X509_EXTENSION	*subjectaltname;
-	u_int8_t	*sandata;
+	ASN1_STRING *value;
+	const u_int8_t	*sandata;
 	int		extpos, santype, sanlen;
 
 	extpos = X509_get_ext_by_NID(scert, NID_subject_alt_name, -1);
@@ -1092,15 +1114,15 @@ x509_cert_subjectaltname(X509 *scert, u_int8_t **altname, u_int32_t *len)
 	}
 	subjectaltname = X509_get_ext(scert, extpos);
 
-	if (!subjectaltname || !subjectaltname->value ||
-	    !subjectaltname->value->data ||
-	    subjectaltname->value->length < 4) {
+	if (!subjectaltname ||
+	    (value = X509_EXTENSION_get_data(subjectaltname)) == NULL ||
+	    ASN1_STRING_length(value) < 4) {
 		log_print("x509_cert_subjectaltname: invalid "
 		    "subjectaltname extension");
 		return 0;
 	}
 	/* SSL does not handle unknown ASN stuff well, do it by hand.  */
-	sandata = subjectaltname->value->data;
+	sandata = ASN1_STRING_get0_data(value);
 	santype = sandata[2] & 0x3f;
 	sanlen = sandata[3];
 	sandata += 4;
@@ -1110,7 +1132,7 @@ x509_cert_subjectaltname(X509 *scert, u_int8_t **altname, u_int32_t *len)
 	 * extra stuff in subjectAltName, so we will just take the first
 	 * salen bytes, and not worry about what follows.
 	 */
-	if (sanlen + 4 > subjectaltname->value->length) {
+	if (sanlen + 4 > ASN1_STRING_length(value)) {
 		log_print("x509_cert_subjectaltname: subjectaltname invalid "
 		    "length");
 		return 0;
@@ -1127,7 +1149,7 @@ x509_cert_get_subjects(void *scert, int *cnt, u_int8_t ***id,
 	X509		*cert = scert;
 	X509_NAME	*subject;
 	int		type;
-	u_int8_t	*altname;
+	const u_int8_t	*altname;
 	u_int32_t	altlen;
 	u_int8_t	*buf = 0;
 	unsigned char	*ubuf;
@@ -1255,12 +1277,12 @@ x509_cert_get_key(void *scert, void *keyp)
 	key = X509_get_pubkey(cert);
 
 	/* Check if we got the right key type.  */
-	if (key->type != EVP_PKEY_RSA) {
+	if (EVP_PKEY_id(key) != EVP_PKEY_RSA) {
 		log_print("x509_cert_get_key: public key is not a RSA key");
 		X509_free(cert);
 		return 0;
 	}
-	*(RSA **)keyp = RSAPublicKey_dup(key->pkey.rsa);
+	*(RSA **)keyp = RSAPublicKey_dup(EVP_PKEY_get0_RSA(key));
 
 	return *(RSA **)keyp == NULL ? 0 : 1;
 }

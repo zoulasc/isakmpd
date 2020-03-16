@@ -227,7 +227,7 @@ udp_encap_create(char *name)
 {
 	struct virtual_transport *v;
 	struct udp_transport	*u;
-	struct transport	*rv, *t;
+	struct transport	*rv;
 	struct sockaddr		*dst, *addr;
 	struct conf_list	*addr_list = 0;
 	struct conf_list_node	*addr_node;
@@ -303,7 +303,6 @@ udp_encap_create(char *name)
 		rv = 0;
 		goto ret;
 	}
-	t = (struct transport *)v;
 	rv = udp_clone(v->encap, dst);
 	if (rv)
 		rv->vtbl = &udp_encap_transport_vtbl;

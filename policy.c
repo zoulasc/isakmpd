@@ -165,8 +165,8 @@ policy_callback(char *name)
 	static char    *remote_id_proto, remote_id_port[PMAX];
 	static char     remote_filter_port[PMAX], local_filter_port[PMAX];
 	static char    *remote_filter_proto, *local_filter_proto, *pfs;
-	static char    *initiator, remote_filter_proto_num[3];
-	static char	local_filter_proto_num[3], remote_id_proto_num[3];
+	static char    *initiator, remote_filter_proto_num[32];
+	static char	local_filter_proto_num[32], remote_id_proto_num[32];
 	static char     phase1_group[PMAX];
 
 	/* Allocated.  */

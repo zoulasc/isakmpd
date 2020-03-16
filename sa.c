@@ -473,8 +473,8 @@ sa_dump(int cls, int level, char *header, struct sa *sa)
 	    decode_32(sa->cookies + 8), decode_32(sa->cookies + 12)));
 	LOG_DBG((cls, level, "%s: msgid %08x refcnt %d", header,
 	    decode_32(sa->message_id), sa->refcnt));
-	LOG_DBG((cls, level, "%s: life secs %llu kb %llu", header, sa->seconds,
-	    sa->kilobytes));
+	LOG_DBG((cls, level, "%s: life secs %" PRIu64 " kb %" PRIu64, header,
+	    sa->seconds, sa->kilobytes));
 	for (proto = TAILQ_FIRST(&sa->protos); proto;
 	    proto = TAILQ_NEXT(proto, link)) {
 		LOG_DBG((cls, level, "%s: suite %d proto %d", header,
@@ -677,7 +677,7 @@ report_lifetimes(FILE *fd, struct sa *sa)
 	long timeout;
 
 	if (sa->seconds)
-		fprintf(fd, "Lifetime: %llu seconds\n", sa->seconds);
+		fprintf(fd, "Lifetime: %" PRIu64 " seconds\n", sa->seconds);
 
 	if (sa->soft_death) {
 		timeout = get_timeout(&sa->soft_death->expiration);
@@ -696,7 +696,7 @@ report_lifetimes(FILE *fd, struct sa *sa)
 	}
 
 	if (sa->kilobytes)
-		fprintf(fd, "Lifetime: %llu kilobytes\n", sa->kilobytes);
+		fprintf(fd, "Lifetime: %" PRIu64 " kilobytes\n", sa->kilobytes);
 }
 
 /*
@@ -1369,8 +1369,8 @@ sa_setup_expirations(struct sa *sa)
 		 */
 		seconds = sa->seconds * (850 + arc4random_uniform(100)) / 1000;
 		LOG_DBG((LOG_TIMER, 95,
-		    "sa_setup_expirations: SA %p soft timeout in %llu seconds",
-		    sa, seconds));
+		    "sa_setup_expirations: SA %p soft timeout in %" PRIu64
+		    " seconds", sa, seconds));
 		expiration.tv_sec += seconds;
 		sa->soft_death = timer_add_event("sa_soft_expire",
 		    sa_soft_expire, sa, &expiration);
@@ -1384,8 +1384,8 @@ sa_setup_expirations(struct sa *sa)
 	if (!sa->death) {
 		clock_gettime(CLOCK_MONOTONIC, &expiration);
 		LOG_DBG((LOG_TIMER, 95,
-		    "sa_setup_expirations: SA %p hard timeout in %llu seconds",
-		    sa, sa->seconds));
+		    "sa_setup_expirations: SA %p hard timeout in %" PRIu64
+		    " seconds", sa, sa->seconds));
 		expiration.tv_sec += sa->seconds;
 		sa->death = timer_add_event("sa_hard_expire", sa_hard_expire,
 		    sa, &expiration);

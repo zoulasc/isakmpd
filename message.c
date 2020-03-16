@@ -2104,7 +2104,8 @@ int
 message_negotiate_sa(struct message *msg, int (*validate)(struct exchange *,
     struct sa *, struct sa *))
 {
-	struct payload *tp, *propp, *sap, *next_tp = 0, *next_propp, *next_sap;
+	struct payload *tp, *propp, *sap, *next_tp = 0, *next_propp = 0;
+	struct payload *next_sap = 0;
 	struct payload *saved_tp = 0, *saved_propp = 0, *saved_sap = 0;
 	struct sa      *sa;
 	struct proto   *proto;

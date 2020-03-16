@@ -231,7 +231,11 @@ text2sockaddr(char *address, char *port, struct sockaddr **sa, sa_family_t af,
 			rtm->rtm_seq = seq = arc4random();
 
 			/* default destination */
-			sa2 = (struct sockaddr *)((char *)rtm + rtm->rtm_hdrlen);
+#ifdef __OpenBSD__
+			sa2 = (void *)((char *)rtm + rtm->rtm_hdrlen);
+#else
+			sa2 = (void *)(rtm + 1);
+#endif
 			switch (af) {
 			case AF_INET: {
 				sin = (struct sockaddr_in *)sa2;

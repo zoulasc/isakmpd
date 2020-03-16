@@ -112,6 +112,10 @@ monitor_init(int debug)
 		if (chroot(pw->pw_dir) != 0 || chdir("/") != 0)
 			log_fatal("monitor_init: chroot failed");
 
+#ifndef __OpenBSD__
+#define setresgid(a, b, c) setgid(a)
+#define setresuid(a, b, c) setuid(a)
+#endif
 		if (setgroups(1, &pw->pw_gid) == -1 ||
 		    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) ||
 		    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid))
@@ -199,7 +203,7 @@ monitor_open(const char *path, int flags, mode_t mode)
 {
 	size_t	len;
 	int	fd, err, cmd;
-	char	pathreal[PATH_MAX];
+	char	pathreal[2 * PATH_MAX];
 
 	if (path[0] == '/')
 		strlcpy(pathreal, path, sizeof pathreal);
@@ -692,6 +696,7 @@ static int
 m_priv_local_sanitize_path(const char *path, size_t pmax, int flags)
 {
 	char new_path[PATH_MAX], var_run[PATH_MAX], *enddir;
+	char old_path[PATH_MAX];
 
 	/*
 	 * We only permit paths starting with
@@ -706,14 +711,14 @@ m_priv_local_sanitize_path(const char *path, size_t pmax, int flags)
 		 * It is ok if the directory exists,
 		 * but the file should be created.
 		 */
-		if (strlcpy(new_path, path, sizeof(new_path)) >=
-		    sizeof(new_path))
+		if (strlcpy(old_path, path, sizeof(old_path)) >=
+		    sizeof(old_path))
 			return 1;
-		enddir = strrchr(new_path, '/');
+		enddir = strrchr(old_path, '/');
 		if (enddir == NULL || enddir[1] == '\0')
 			return 1;
 		enddir[1] = '\0';
-		if (realpath(new_path, new_path) == NULL) {
+		if (realpath(old_path, new_path) == NULL) {
 			errno = ENOENT;
 			return 1;
 		}
@@ -721,7 +726,7 @@ m_priv_local_sanitize_path(const char *path, size_t pmax, int flags)
 		strlcat(new_path, enddir, sizeof(new_path));
 	}
 
-	if (realpath("/var/run/", var_run) == NULL)
+	if (realpath("/var/chroot/isakmpd", var_run) == NULL)
 		return 1;
 	strlcat(var_run, "/", sizeof(var_run));
 
@@ -756,14 +761,30 @@ m_priv_check_sockopt(int level, int name)
 		/* These are allowed */
 	case SO_REUSEPORT:
 	case SO_REUSEADDR:
+#ifdef IP_AUTH_LEVEL
 	case IP_AUTH_LEVEL:
+#endif
+#ifdef IP_ESP_TRANS_LEVEL
 	case IP_ESP_TRANS_LEVEL:
+#endif
+#ifdef IP_ESP_NETWORK_LEVEL
 	case IP_ESP_NETWORK_LEVEL:
+#endif
+#ifdef IP_IPCOMP_LEVEL
 	case IP_IPCOMP_LEVEL:
+#endif
+#ifdef IPV6_AUTH_LEVEL
 	case IPV6_AUTH_LEVEL:
+#endif
+#ifdef IPV6_ESP_TRANS_LEVEL
 	case IPV6_ESP_TRANS_LEVEL:
+#endif
+#ifdef IPV6_ESP_NETWORK_LEVEL
 	case IPV6_ESP_NETWORK_LEVEL:
+#endif
+#ifdef IPV6_IPCOMP_LEVEL
 	case IPV6_IPCOMP_LEVEL:
+#endif
 		break;
 
 	default:
