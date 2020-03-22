@@ -70,6 +70,7 @@
 #include "policy.h"
 
 #include "udp_encap.h"
+#include "openbsd-compat.h"
 
 #define IN6_IS_ADDR_FULL(a)						\
 	((*(u_int32_t *)(void *)(&(a)->s6_addr[0]) == 0xffffffff) &&	\
@@ -1501,6 +1502,7 @@ pf_key_v2_mask6_to_bits(u_int8_t *mask)
 /*
  * Enable/disable a flow.
  * XXX Assumes OpenBSD {ADD,DEL}FLOW extensions.
+ * tproto is USE or REQUIRE
  */
 static int
 pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
@@ -1514,9 +1516,7 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 {
 	char           *laddr_str, *lmask_str, *raddr_str, *rmask_str;
 
-#ifdef SADB_X_DELFLOW
 	struct sadb_msg msg;
-#endif
 #ifdef SADB_X_EXT_FLOW_TYPE
 	struct sadb_protocol flowtype;
 #endif
@@ -1529,7 +1529,6 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 	size_t		len;
 	int		err;
 
-#ifdef SADB_X_DELFLOW
 	msg.sadb_msg_type = delete ? SADB_X_DELFLOW : SADB_X_ADDFLOW;
 	switch (proto) {
 	case IPSEC_PROTO_IPSEC_ESP:
@@ -1594,7 +1593,6 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 			sid = 0;
 		}
 	}
-#endif
 	/* Setup the flow type extension.  */
 #ifdef SADB_X_EXT_FLOW_TYPE
 	bzero(&flowtype, sizeof flowtype);
