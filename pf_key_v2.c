@@ -90,6 +90,12 @@
 /* How many microseconds we will wait for a reply from the PF_KEY socket.  */
 #define PF_KEY_REPLY_TIMEOUT 1000
 
+/* Structure of two sockaddresses, used for NetBSD policy extension */
+	struct concat_sockaddr {
+		struct sockaddr src;
+		struct sockaddr dst;
+	};
+
 struct pf_key_v2_node {
 	TAILQ_ENTRY(pf_key_v2_node) link;
 	void           *seg;
@@ -119,6 +125,8 @@ static int      pf_key_v2_remove_conf(char *);
 static int      pf_key_v2_conf_refhandle(int, char *);
 
 static int      pf_key_v2_conf_refinc(int, char *);
+static uint8_t  mask2prefix(struct sockaddr *);
+
 
 /* The socket to use for PF_KEY interactions.  */
 int      pf_key_v2_socket;
@@ -1502,7 +1510,6 @@ pf_key_v2_mask6_to_bits(u_int8_t *mask)
 /*
  * Enable/disable a flow.
  * XXX Assumes OpenBSD {ADD,DEL}FLOW extensions.
- * tproto is USE or REQUIRE
  */
 static int
 pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
@@ -1520,7 +1527,6 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 #ifdef SADB_X_EXT_FLOW_TYPE
 	struct sadb_protocol flowtype;
 #endif
-	struct sadb_ident *sid = 0;
 	struct sadb_address *addr = 0;
 #ifdef SADB_X_EXT_FLOW_TYPE
 	struct sadb_protocol tprotocol;
@@ -1528,8 +1534,17 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 	struct pf_key_v2_msg *flow = 0, *ret = 0;
 	size_t		len;
 	int		err;
-
+#ifndef __OpenBSD__
+	struct sadb_x_ipsecrequest	 sa_ipsec;
+	struct sadb_x_policy	 	*sa_policy = 0;
+	struct sadb_x_sa2	 	 sa_2;
+	struct concat_sockaddr		 srcdst;
+#else
+	struct sadb_ident *sid = 0;
+#endif
+	bzero(&msg, sizeof(msg));
 	msg.sadb_msg_type = delete ? SADB_X_DELFLOW : SADB_X_ADDFLOW;
+#ifdef __OpenBSD__
 	switch (proto) {
 	case IPSEC_PROTO_IPSEC_ESP:
 		msg.sadb_msg_satype = SADB_SATYPE_ESP;
@@ -1544,11 +1559,18 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 		log_print("pf_key_v2_flow: invalid proto %d", proto);
 		goto cleanup;
 	}
+#else
+	msg.sadb_msg_version = PF_KEY_V2;
+	msg.sadb_msg_pid = getpid();
+	msg.sadb_msg_len = sizeof(msg) / 8;
+	msg.sadb_msg_satype = SADB_SATYPE_UNSPEC;
+#endif
 	msg.sadb_msg_seq = 0;
 	flow = pf_key_v2_msg_new(&msg, 0);
 	if (!flow)
 		goto cleanup;
 
+#ifdef __OpenBSD__
 	if (!delete) {
 		/* Setup the source ID, if provided. */
 		if (srcid) {
@@ -1594,7 +1616,6 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 		}
 	}
 	/* Setup the flow type extension.  */
-#ifdef SADB_X_EXT_FLOW_TYPE
 	bzero(&flowtype, sizeof flowtype);
 	flowtype.sadb_protocol_exttype = SADB_X_EXT_FLOW_TYPE;
 	flowtype.sadb_protocol_len = sizeof flowtype / PF_KEY_V2_CHUNK;
@@ -1604,11 +1625,24 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 
 	if (pf_key_v2_msg_add(flow, (struct sadb_ext *)&flowtype, 0) == -1)
 		goto cleanup;
+#else
+	/* Setup the sa2 extension */
+	bzero(&sa_2, sizeof(sa_2));
+	sa_2.sadb_x_sa2_exttype = SADB_X_EXT_SA2;
+	sa_2.sadb_x_sa2_len = sizeof(sa_2) / 8;
+	sa_2.sadb_x_sa2_mode = (iproto->encap_mode == IPSEC_ENCAP_TUNNEL ||
+		    iproto->encap_mode == IPSEC_ENCAP_UDP_ENCAP_TUNNEL ||
+		    iproto->encap_mode == IPSEC_ENCAP_UDP_ENCAP_TUNNEL_DRAFT) ?
+			IPSEC_MODE_TUNNEL : IPSEC_MODE_TRANSPORT;
+
+	if (pf_key_v2_msg_add(flow, (struct sadb_ext *)&sa_2, 0) == -1)
+		goto cleanup;
 #endif
 
 	/*
 	 * Setup the ADDRESS extensions.
 	 */
+#ifdef __OpenBSD__
 	len = sizeof *addr + PF_KEY_V2_ROUND(SA_LEN(src));
 	if (!delete)
 	{
@@ -1624,6 +1658,7 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 			goto cleanup;
 		addr = 0;
 	}
+#endif
 	len = sizeof *addr + PF_KEY_V2_ROUND(SA_LEN(laddr));
 #ifdef SADB_X_EXT_SRC_FLOW
 	addr = calloc(1, len);
@@ -1631,6 +1666,12 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 		goto cleanup;
 	addr->sadb_address_exttype = SADB_X_EXT_SRC_FLOW;
 	addr->sadb_address_len = len / PF_KEY_V2_CHUNK;
+#ifndef __OpenBSD__
+	addr->sadb_address_proto = tproto;
+	addr->sadb_address_prefixlen = mask2prefix(lmask);
+	if (addr->sadb_address_prefixlen > 128)
+		goto cleanup;
+#endif
 	addr->sadb_address_reserved = 0;
 	pf_key_v2_setup_sockaddr(addr + 1, laddr, 0, sport, 0);
 	if (pf_key_v2_msg_add(flow, (struct sadb_ext *) addr,
@@ -1659,6 +1700,12 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 		goto cleanup;
 	addr->sadb_address_exttype = SADB_X_EXT_DST_FLOW;
 	addr->sadb_address_len = len / PF_KEY_V2_CHUNK;
+#ifndef __OpenBSD__
+	addr->sadb_address_proto = tproto;
+	addr->sadb_address_prefixlen = mask2prefix(rmask);
+	if (addr->sadb_address_prefixlen > 128)
+		goto cleanup;
+#endif
 	addr->sadb_address_reserved = 0;
 	pf_key_v2_setup_sockaddr(addr + 1, raddr, 0, dport, 0);
 	if (pf_key_v2_msg_add(flow, (struct sadb_ext *) addr,
@@ -1690,6 +1737,50 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 
 	if (pf_key_v2_msg_add(flow, (struct sadb_ext *)&tprotocol, 0) == -1)
 		goto cleanup;
+#endif
+
+#ifndef __OpenBSD__
+	/* Setup the policy extension */
+	len = sizeof(struct sadb_x_policy) +
+		sizeof(struct sadb_x_ipsecrequest) + SA_LEN(src) + SA_LEN(dst);
+	sa_policy = calloc(1, len);
+	sa_policy->sadb_x_policy_exttype = SADB_X_EXT_POLICY;
+	sa_policy->sadb_x_policy_dir = ingress ?
+		IPSEC_DIR_INBOUND : IPSEC_DIR_OUTBOUND;
+	/* Setup the ipsec part of the policy extension */
+	bzero(&sa_ipsec, sizeof(sa_ipsec) + SA_LEN(src) + SA_LEN(dst));
+	bzero(&srcdst, SA_LEN(src) + SA_LEN(dst));
+	srcdst.src = *src;
+	srcdst.dst = *dst;
+	switch (proto) {
+	case IPSEC_PROTO_IPSEC_ESP:
+		sa_ipsec.sadb_x_ipsecrequest_proto = IPPROTO_ESP;
+		break;
+	case IPSEC_PROTO_IPSEC_AH:
+		sa_ipsec.sadb_x_ipsecrequest_proto = IPPROTO_AH;
+		break;
+	case IPSEC_PROTO_IPCOMP:
+		sa_ipsec.sadb_x_ipsecrequest_proto = IPPROTO_IPCOMP;
+		break;
+	default:
+		log_print("pf_key_v2_flow: invalid proto %d", proto);
+		goto cleanup;
+	}
+	sa_policy->sadb_x_policy_type = IPSEC_POLICY_IPSEC;
+	sa_ipsec.sadb_x_ipsecrequest_mode = IPSEC_MODE_TUNNEL; /* XXX */
+	sa_ipsec.sadb_x_ipsecrequest_level = IPSEC_LEVEL_REQUIRE;
+	sa_ipsec.sadb_x_ipsecrequest_len = sizeof(sa_ipsec) +
+		SA_LEN(src) + SA_LEN(dst);
+	sa_policy->sadb_x_policy_len =
+		(sizeof(struct sadb_x_policy) +
+		sa_ipsec.sadb_x_ipsecrequest_len) / 8;
+	memcpy(&sa_ipsec + 1, &srcdst, SA_LEN(src) + SA_LEN(dst));
+	memcpy(sa_policy + 1, &sa_ipsec,
+		sizeof(struct sadb_x_ipsecrequest));
+	if (pf_key_v2_msg_add(flow, (struct sadb_ext *) sa_policy,
+	    PF_KEY_V2_NODE_MALLOCED) == -1)
+		goto cleanup;
+	sa_policy = 0;
 #endif
 
 	if (sockaddr2text(laddr, &laddr_str, 0))
@@ -1736,7 +1827,11 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 	return 0;
 
 cleanup:
+#ifdef __OpenBSD__
 	free(sid);
+#else
+	free(sa_policy);
+#endif
 	free(addr);
 	if (flow)
 		pf_key_v2_msg_free(flow);
@@ -2346,6 +2441,97 @@ mask6len(const struct sockaddr_in6 *mask)
 		len = -1;
 	return len;
 }
+
+/* Return prefix length given a netmask as a sockaddr. */
+uint8_t
+mask2prefix(struct sockaddr *maskp)
+{
+	uint8_t len;
+	switch(maskp->sa_family) {
+	    case AF_INET:
+		len  = mask4len((struct sockaddr_in *)maskp);
+		break;
+
+	    case AF_INET6:
+		len  = mask6len((struct sockaddr_in6 *)maskp);
+		break;
+
+	    default:
+		log_error("mask2prefix: unsupported address family");
+		return (255);
+	}
+	return (len);
+}
+/* another approach, will find more invalid mask addresses but more complex */
+#if 0
+	static const u_char maskarray[7] = {0x80, 0xc0, 0xe0, 0xf0,
+					    0xf8, 0xfc, 0xfe};
+	uint8_t bytelen = 0, bitlen = 0, i, j, done = 0;
+	uint8_t len;
+	struct in_addr mask4p;
+	struct in6_addr mask6p;
+	u_char *byte;
+
+	switch(maskp->sa_family) {
+	    case AF_INET:
+		mask4p = ((struct sockaddr_in *)maskp)->sin_addr;
+		uint32_t addr = mask4p.s_addr;
+		if (addr == 0)
+			return (0);
+		byte = (u_char *)&addr;
+		for (i = 0; i < 4; i++) {
+		    if ((byte[i] != 0x00) &&
+			(byte[i] != 0xff)) {
+			    for (j = 0; j < 7; j++) {
+				if (byte[i] == maskarray[j]) {
+					bitlen = j + 1;
+					done++;
+				}
+			    }
+			    if (!done)
+				goto err;
+		    }
+		    if (byte[i] == 0xff)
+				bytelen++;
+		}
+		break;
+
+	    case AF_INET6:
+		mask6p = ((struct sockaddr_in6 *)maskp)->sin6_addr;
+		if (IN6_IS_ADDR_UNSPECIFIED(&mask6p))
+			return (0);
+		for (i = 0; i < 16; i++) {
+		    if ((mask6p.s6_addr[i] != 0x00) &&
+			(mask6p.s6_addr[i] != 0xff)) {
+			    for (j = 0; j < 7; j++) {
+				if (mask6p.s6_addr[i] == maskarray[j]) {
+					bitlen = j + 1;
+					done++;
+				}
+			    }
+			    if (!done)
+				goto err;
+		    }
+		    if (mask6p.s6_addr[i] == 0xff)
+				bytelen++;
+		}
+		break;
+
+	    default:
+		log_error("mask2prefix: unsupported address family");
+		return (255);
+	}
+
+	if ((!bitlen && !bytelen) || done > 1)
+		goto err;
+	len = bitlen + 8 * bytelen;
+	log_print("mask2prefix: prefixlen = %u", len);
+	return (len);
+
+err:	log_error("mask2prefix: invalid mask sockaddr");
+	return (255);
+}
+#endif
 #endif
 
 static int
@@ -2386,8 +2572,9 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 	char		confname[120], *conn = 0;
 	char           *srcid = 0, *dstid = 0, *prefstring = 0;
 	int		slen, af, afamily, masklen;
+	struct sockaddr *sflow, *dflow;
 #ifdef SADB_X_EXT_SRC_MASK
-	struct sockaddr *smask, *sflow, *dmask, *dflow;
+	struct sockaddr *smask, *dmask;
 #endif
 #ifdef SADB_X_EXT_FLOW_TYPE
 	struct sadb_protocol *sproto;
@@ -2531,6 +2718,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 			goto fail;
 		}
 		dport = ((struct sockaddr_in *) dflow)->sin_port;
+#ifdef SADB_X_EXT_SRC_MASK
 		if (inet_ntop(AF_INET,
 		    &((struct sockaddr_in *) smask)->sin_addr, ssmask,
 		    ADDRESS_MAX) == NULL) {
@@ -2555,6 +2743,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 			dhostflag = 1;
 			didtype = "IPV4_ADDR";
 		}
+#endif
 		break;
 
 	case AF_INET6:
@@ -2572,6 +2761,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 			goto fail;
 		}
 		dport = ((struct sockaddr_in6 *) dflow)->sin6_port;
+#ifdef SADB_X_EXT_SRC_MASK
 		if (inet_ntop(AF_INET6,
 		    &((struct sockaddr_in6 *) smask)->sin6_addr,
 		    ssmask, ADDRESS_MAX) == NULL) {
@@ -2595,6 +2785,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 			dhostflag = 1;
 			didtype = "IPV6_ADDR";
 		}
+#endif
 		break;
 	}
 #endif
