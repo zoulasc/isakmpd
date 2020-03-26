@@ -1766,7 +1766,11 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 		goto cleanup;
 	}
 	sa_policy->sadb_x_policy_type = IPSEC_POLICY_IPSEC;
-	sa_ipsec.sadb_x_ipsecrequest_mode = IPSEC_MODE_TUNNEL; /* XXX */
+	sa_ipsec.sadb_x_ipsecrequest_mode =
+		    (iproto->encap_mode == IPSEC_ENCAP_TUNNEL ||
+		    iproto->encap_mode == IPSEC_ENCAP_UDP_ENCAP_TUNNEL ||
+		    iproto->encap_mode == IPSEC_ENCAP_UDP_ENCAP_TUNNEL_DRAFT) ?
+			IPSEC_MODE_TUNNEL : IPSEC_MODE_TRANSPORT;
 	sa_ipsec.sadb_x_ipsecrequest_level = IPSEC_LEVEL_REQUIRE;
 	sa_ipsec.sadb_x_ipsecrequest_len = sizeof(sa_ipsec) +
 		SA_LEN(src) + SA_LEN(dst);
