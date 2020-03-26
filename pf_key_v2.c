@@ -127,7 +127,6 @@ static int      pf_key_v2_conf_refhandle(int, char *);
 static int      pf_key_v2_conf_refinc(int, char *);
 static uint8_t  mask2prefix(struct sockaddr *);
 
-
 /* The socket to use for PF_KEY interactions.  */
 int      pf_key_v2_socket;
 
