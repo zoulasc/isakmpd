@@ -163,6 +163,22 @@ udp_encap_make(struct sockaddr *laddr)
 		goto err;
 	}
 
+#ifndef __OpenBSD__
+	on = UDP_ENCAP_ESPINUDP;
+	if (laddr->sa_family == AF_INET) {
+		LOG_DBG((LOG_MISC, 20, "udp_encap_make: "
+		    "transport %p socket %d family %d", t, s,
+		    t->src->sa_family == AF_INET ? 4 : 6));
+		LOG_DBG((LOG_MISC, 20, "udp_encap_make: "
+		    "configuring UDP socket for NAT-T"));
+		if (setsockopt(s, IPPROTO_UDP, UDP_ENCAP,
+			       &on, sizeof(int)) < 0) {
+			log_error("udp_encap_make: "
+		    "failed to set ESP in UDP socket");
+		}
+	}
+#endif
+
 	t->transport.vtbl = &udp_encap_transport_vtbl;
 	if (monitor_bind(s, t->src, SA_LEN(t->src))) {
 		if (sockaddr2text(t->src, &tstr, 0))
