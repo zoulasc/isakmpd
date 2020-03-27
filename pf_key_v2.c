@@ -51,6 +51,9 @@
 #include <errno.h>
 #include <bitstring.h>
 #include <inttypes.h>
+#ifndef __OpenBSD__
+#include <netinet/udp.h>
+#endif
 
 #include "cert.h"
 #include "conf.h"
@@ -126,6 +129,15 @@ static int      pf_key_v2_conf_refhandle(int, char *);
 
 static int      pf_key_v2_conf_refinc(int, char *);
 static uint8_t  mask2prefix(struct sockaddr *);
+static int
+pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
+    struct sockaddr *raddr, struct sockaddr *rmask,
+    u_int8_t tproto, u_int16_t sport, u_int16_t dport,
+    u_int8_t *spi, u_int8_t proto, struct sockaddr *dst,
+    struct sockaddr *src, int delete, int ingress,
+    u_int8_t srcid_type, u_int8_t *srcid, int srcid_len,
+    u_int8_t dstid_type, u_int8_t *dstid, int dstid_len,
+    struct ipsec_proto *iproto);
 
 /* The socket to use for PF_KEY interactions.  */
 int      pf_key_v2_socket;
@@ -900,20 +912,30 @@ pf_key_v2_set_spi(struct sa *sa, struct proto *proto, int incoming,
 	struct sadb_lifetime *life = 0;
 	struct sadb_address *addr = 0;
 	struct sadb_key *key = 0;
+#ifdef __OpenBSD__
 	struct sadb_ident *sid = 0;
+	u_int8_t       *pp;
+	int		idtype;
+#endif
 	struct sockaddr *src, *dst;
 	struct pf_key_v2_msg *update = 0, *ret = 0;
 	struct ipsec_proto *iproto = proto->data;
 	size_t		len;
 	int		keylen, hashlen, err;
-	u_int8_t       *pp;
-	int		idtype;
 	struct ipsec_sa *isa = sa->data;
 #ifdef SADB_X_EXT_FLOW_TYPE
 	struct sadb_protocol flowtype, tprotocol;
 #endif
 #ifdef SADB_X_EXT_UDPENCAP
 	struct sadb_x_udpencap udpencap;
+#endif
+#ifdef SADB_X_EXT_NAT_T_TYPE
+	struct sadb_x_nat_t_type nat_type;
+	struct sadb_x_nat_t_port nat_sport, nat_dport;
+#endif
+#ifndef __OpenBSD__
+	struct sadb_x_sa2	sa_2;
+	int 			error;
 #endif
 	char           *addr_str;
 
@@ -1121,6 +1143,18 @@ pf_key_v2_set_spi(struct sa *sa, struct proto *proto, int incoming,
 	if (pf_key_v2_msg_add(update, (struct sadb_ext *)&ssa, 0) == -1)
 		goto cleanup;
 
+#ifndef __OpenBSD__
+	bzero(&sa_2, sizeof(sa_2));
+	sa_2.sadb_x_sa2_exttype = SADB_X_EXT_SA2;
+	sa_2.sadb_x_sa2_len = sizeof(sa_2) / 8;
+	sa_2.sadb_x_sa2_mode = (iproto->encap_mode == IPSEC_ENCAP_TUNNEL ||
+	    iproto->encap_mode == IPSEC_ENCAP_UDP_ENCAP_TUNNEL ||
+	    iproto->encap_mode == IPSEC_ENCAP_UDP_ENCAP_TUNNEL_DRAFT) ?
+	    IPSEC_MODE_TUNNEL : IPSEC_MODE_TRANSPORT;
+	if (pf_key_v2_msg_add(update, (struct sadb_ext *)&sa_2, 0)
+		== -1)
+		goto cleanup;
+#endif
 	if (sa->seconds || sa->kilobytes) {
 		/* Setup the hard limits.  */
 		life = malloc(sizeof *life);
@@ -1222,6 +1256,34 @@ pf_key_v2_set_spi(struct sa *sa, struct proto *proto, int incoming,
 		goto cleanup;
 	addr = 0;
 
+#ifdef SADB_X_EXT_NAT_T_TYPE
+	if (isakmp_sa->flags & SA_FLAG_NAT_T_ENABLE) {
+		bzero(&nat_type, sizeof(nat_type));
+		nat_type.sadb_x_nat_t_type_len = sizeof(nat_type) / 8;
+		nat_type.sadb_x_nat_t_type_exttype = SADB_X_EXT_NAT_T_TYPE;
+		nat_type.sadb_x_nat_t_type_type = UDP_ENCAP_ESPINUDP;
+		bzero(&nat_sport, sizeof(nat_sport));
+		nat_sport.sadb_x_nat_t_port_len = sizeof(nat_sport) / 8;
+		nat_sport.sadb_x_nat_t_port_exttype = SADB_X_EXT_NAT_T_SPORT;
+		nat_sport.sadb_x_nat_t_port_port = incoming ?
+		    sockaddr_port(dst) : sockaddr_port(src);
+		bzero(&nat_dport, sizeof(nat_dport));
+		nat_dport.sadb_x_nat_t_port_len = sizeof(nat_dport) / 8;
+		nat_dport.sadb_x_nat_t_port_exttype = SADB_X_EXT_NAT_T_DPORT;
+		nat_dport.sadb_x_nat_t_port_port = incoming ?
+		    sockaddr_port(src) : sockaddr_port(dst);
+		if (pf_key_v2_msg_add(update, (struct sadb_ext *)&nat_type, 0)
+			== -1)
+			goto cleanup;
+		if (pf_key_v2_msg_add(update, (struct sadb_ext *)&nat_sport, 0)
+			== -1)
+			goto cleanup;
+		if (pf_key_v2_msg_add(update, (struct sadb_ext *)&nat_dport, 0)
+			== -1)
+			goto cleanup;
+	}
+#endif
+
 	if (proto->proto != IPSEC_PROTO_IPCOMP) {
 		/* Setup the KEY extensions.  */
 		if (hashlen) {
@@ -1259,6 +1321,7 @@ pf_key_v2_set_spi(struct sa *sa, struct proto *proto, int incoming,
 			key = 0;
 		}
 	}
+#ifdef __OpenBSD__
 	/* Setup identity extensions. */
 	if (isakmp_sa->id_i) {
 		pp = pf_key_v2_convert_id(isakmp_sa->id_i, isakmp_sa->id_i_len,
@@ -1430,6 +1493,7 @@ nodid:
 			goto cleanup;
 	}
 #endif
+#endif /* __OpenBSD__ */
 
 	/* XXX Here can sensitivity extensions be setup.  */
 
@@ -1461,6 +1525,23 @@ nodid:
 	pf_key_v2_msg_free(ret);
 	ret = 0;
 
+#ifndef __OpenBSD__
+	if (incoming) {
+	   error = pf_key_v2_flow(isa->dst_net, isa->dst_mask, isa->src_net,
+	      isa->src_mask, isa->tproto, isa->dport, isa->sport, proto->spi[1],
+	      proto->proto, src, dst, 0, 1, 0, NULL, 0, 0, NULL,
+	      0, proto->data);
+	}
+	else {
+	   error = pf_key_v2_flow(isa->src_net, isa->src_mask, isa->dst_net,
+	      isa->dst_mask, isa->tproto, isa->sport, isa->dport, proto->spi[0],
+	      proto->proto, dst, src, 0, 0, 0, NULL, 0, 0, NULL,
+	      0, proto->data);
+	}
+	if (error)
+	    log_print("pf_key_v2_set_spi: pf_key_v2_flow returned an error");
+#endif
+
 	/*
 	 * If we are doing an addition into an SADB shared with our peer,
 	 * errors here are to be expected as the peer will already have
@@ -1478,7 +1559,9 @@ nodid:
 	return 0;
 
 cleanup:
+#ifdef __OpenBSD__
 	free(sid);
+#endif
 	free(addr);
 	free(life);
 	free(key);

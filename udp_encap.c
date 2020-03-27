@@ -39,6 +39,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifndef __OpenBSD__
+#include <netinet/udp.h>
+#endif
 
 #include "conf.h"
 #include "if.h"
